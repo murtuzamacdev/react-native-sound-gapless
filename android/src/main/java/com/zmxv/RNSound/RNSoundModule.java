@@ -28,6 +28,10 @@ import android.util.Log;
 
 public class RNSoundModule extends ReactContextBaseJavaModule implements AudioManager.OnAudioFocusChangeListener {
   Map<Double, MediaPlayer> playerPool = new HashMap<>();
+  Map<Double, MediaPlayer> nextPlayerPool = new HashMap<>();
+  Map<Double, String> playerFilenamePool = new HashMap<>();
+  Map<Double, Callback> playCallbackPool = new HashMap<>();
+
   ReactApplicationContext context;
   final static Object NULL = null;
   String category;
@@ -67,6 +71,7 @@ public class RNSoundModule extends ReactContextBaseJavaModule implements AudioMa
       return;
     }
     this.playerPool.put(key, player);
+    this.playerFilenamePool.put(key, fileName);
 
     final RNSoundModule module = this;
 
@@ -138,16 +143,46 @@ public class RNSoundModule extends ReactContextBaseJavaModule implements AudioMa
     });
 
     try {
-      if(options.hasKey("loadSync") && options.getBoolean("loadSync")) {
-        player.prepare();
-      } else {
-        player.prepareAsync();
-      }
-    } catch (Exception ignored) {
-      // When loading files from a file, we useMediaPlayer.create, which actually
-      // prepares the audio for us already. So we catch and ignore this error
-      Log.e("RNSoundModule", "Exception", ignored);
+      player.prepare();
+    } catch(IOException e) {
+      e.printStackTrace();
     }
+  }
+
+  protected void setupNextLoopPlayer(final Double key) {
+    MediaPlayer currentMediaPlayer = playerPool.get(key);
+    MediaPlayer nextMediaPlayer = createMediaPlayer(playerFilenamePool.get(key));
+    try {
+      nextMediaPlayer.prepare();
+    } catch(IOException ignored) {}
+    nextPlayerPool.put(key, nextMediaPlayer);
+
+    currentMediaPlayer.setNextMediaPlayer(nextMediaPlayer);
+
+    currentMediaPlayer.setOnCompletionListener(new OnCompletionListener() {
+      @Override
+      public synchronized void onCompletion(MediaPlayer mp) {
+        if (!nextPlayerPool.containsKey(key)) {
+          onPlayComplete(key);
+        } else {
+          mp.release();
+
+          playerPool.put(key, nextPlayerPool.get(key));
+          nextPlayerPool.remove(key);
+
+          setupNextLoopPlayer(key);
+        }
+      }
+    });
+  }
+
+  protected void stopLooping(final Double key) {
+    MediaPlayer currentMediaPlayer = playerPool.get(key);
+    currentMediaPlayer.setNextMediaPlayer(null);
+
+    MediaPlayer nextMediaPlayer = nextPlayerPool.get(key);
+    nextMediaPlayer.release();
+    nextPlayerPool.remove(key);
   }
 
   protected MediaPlayer createMediaPlayer(final String fileName) {
@@ -228,23 +263,8 @@ public class RNSoundModule extends ReactContextBaseJavaModule implements AudioMa
       this.focusedPlayerKey = key;
     }
 
-    player.setOnCompletionListener(new OnCompletionListener() {
-      boolean callbackWasCalled = false;
+    playCallbackPool.put(key, callback);
 
-      @Override
-      public synchronized void onCompletion(MediaPlayer mp) {
-        if (!mp.isLooping()) {
-          setOnPlay(false, key);
-          if (callbackWasCalled) return;
-          callbackWasCalled = true;
-          try {
-            callback.invoke(true);
-          } catch (Exception e) {
-              //Catches the exception: java.lang.RuntimeException·Illegal callback invocation from native module
-          }
-        }
-      }
-    });
     player.setOnErrorListener(new OnErrorListener() {
       boolean callbackWasCalled = false;
 
@@ -263,6 +283,22 @@ public class RNSoundModule extends ReactContextBaseJavaModule implements AudioMa
     });
     player.start();
     setOnPlay(true, key);
+  }
+
+  // MediaPlayer can only have one completion listener, and we need it for gapless looping. So this
+  // is a bit of a hacky workaround so we can still have a completion callback on the play function.
+  protected void onPlayComplete(final Double key) {
+    setOnPlay(false, key);
+    Callback callback = playCallbackPool.get(key);
+
+    if (callback != null) {
+      try {
+        callback.invoke(true);
+        playCallbackPool.remove(key);
+      } catch (Exception e) {
+        //Catches the exception: java.lang.RuntimeException·Illegal callback invocation from native module
+      }
+    }
   }
 
   @ReactMethod
@@ -309,6 +345,8 @@ public class RNSoundModule extends ReactContextBaseJavaModule implements AudioMa
       player.reset();
       player.release();
       this.playerPool.remove(key);
+      this.playerFilenamePool.remove(key);
+      this.playCallbackPool.remove(key);
 
       // Release audio focus in Android system
       if (!this.mixWithOthers && key == this.focusedPlayerKey) {
@@ -316,8 +354,14 @@ public class RNSoundModule extends ReactContextBaseJavaModule implements AudioMa
         audioManager.abandonAudioFocus(this);
       }
     }
+
+    MediaPlayer nextPlayer = this.nextPlayerPool.get(key);
+    if (nextPlayer != null) {
+      nextPlayer.release();
+      this.nextPlayerPool.remove(key);
+    }
   }
-	
+
   @Override
   public void onCatalystInstanceDestroy() {
     java.util.Iterator it = this.playerPool.entrySet().iterator();
@@ -366,7 +410,11 @@ public class RNSoundModule extends ReactContextBaseJavaModule implements AudioMa
   public void setLooping(final Double key, final Boolean looping) {
     MediaPlayer player = this.playerPool.get(key);
     if (player != null) {
-      player.setLooping(looping);
+      if (looping) {
+        setupNextLoopPlayer(key);
+      } else {
+        stopLooping(key);
+      }
     }
   }
 

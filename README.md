@@ -1,3 +1,26 @@
+This is a fork of `react-native-sound` to add gapless playback on Android. Gapless playback works by default on iOS.
+It is a drop-in replacement for `react-native-sound`, with the same interface. To install this fork, run:
+
+```javascript
+npm install https://github.com/Menardi/react-native-sound-gapless.git --save
+react-native link react-native-sound
+```
+
+It will install as `react-native-sound`, not `react-native-sound-gapless`, so you can drop it straight in to your
+existing projects.
+
+> The implementation is not particularly tidy, so PRs are welcome to make it better!
+
+### How gapless playback works
+
+Simply setting a track to loop on Android does not make it gapless, instead leaving a short silence before restarting the track.
+However, Android does actually support gapless playback between _different_ tracks. So, this fork essentially loads the same
+track twice, and gets Android to handle the gapless playback for us. The downside is that you will use more memory than before,
+because the track is loaded twice. For most cases, this shouldn't matter, but you can
+[profile your app in Android Studio](https://developer.android.com/studio/profile/memory-profiler.html) if you are concerned.
+
+---
+
 # react-native-sound
 
 React Native module for playing sound clips on iOS, Android, and Windows.
