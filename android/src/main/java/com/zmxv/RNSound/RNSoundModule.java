@@ -31,6 +31,8 @@ public class RNSoundModule extends ReactContextBaseJavaModule implements AudioMa
   Map<Double, MediaPlayer> nextPlayerPool = new HashMap<>();
   Map<Double, String> playerFilenamePool = new HashMap<>();
   Map<Double, Callback> playCallbackPool = new HashMap<>();
+  Map<Double, Float> playerLeftVolumePool = new HashMap<>();
+  Map<Double, Float> playerRightVolumePool = new HashMap<>();
 
   ReactApplicationContext context;
   final static Object NULL = null;
@@ -156,7 +158,7 @@ public class RNSoundModule extends ReactContextBaseJavaModule implements AudioMa
       nextMediaPlayer.prepare();
     } catch(IOException ignored) {}
     nextPlayerPool.put(key, nextMediaPlayer);
-
+    currentMediaPlayer.setVolume(playerLeftVolumePool.get(key), playerRightVolumePool.get(key));
     currentMediaPlayer.setNextMediaPlayer(nextMediaPlayer);
 
     currentMediaPlayer.setOnCompletionListener(new OnCompletionListener() {
@@ -381,6 +383,8 @@ public class RNSoundModule extends ReactContextBaseJavaModule implements AudioMa
     MediaPlayer player = this.playerPool.get(key);
     if (player != null) {
       player.setVolume(left, right);
+      this.playerLeftVolumePool.put(key, left);
+      this.playerRightVolumePool.put(key, right);
     }
   }
 
